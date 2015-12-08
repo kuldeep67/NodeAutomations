@@ -1,0 +1,168 @@
+var beautify = require('js-beautify');
+var fs = require('fs');
+var prettyjson = require('prettyjson');
+var options = {
+  noColor: true
+};
+
+    merchPricesSheetURL = 'C:/Users/cts1/Desktop/NodeAutomations-master/NodeAutomations-master/ExcelOutput/pgpricechange.xlsx',
+    payGSKUCellColumn = 'A',payGPriceCellColumn = 'B',
+    payGTab_Min_Count = 2,payGTab_Max_Count = 15;
+    
+    var XLSX = require('xlsx'),excelbuilder = require('excel4node');
+
+
+function loadPayGSKUPrices(){
+    try{
+        cashPriceCollection = [], paygPriceCollection = [];
+        var workbook = XLSX.readFile(merchPricesSheetURL);
+        var sheet_name_list = workbook.SheetNames;
+        console.log("Loading merchandising Pricing Sheet...");
+        console.log(sheet_name_list);
+        
+        sheet_name_list.forEach(function(y) {
+            
+         if( y === "PAYG"){
+          var worksheet = workbook.Sheets[y];
+          for (z in worksheet) {
+              if(payGTab_Min_Count <= payGTab_Max_Count){
+                  if(z[0] === '!') continue;
+                  var skuCell = payGSKUCellColumn+payGTab_Min_Count;
+                  var paygPrice = payGPriceCellColumn+payGTab_Min_Count;
+                  var priceDeatils = {
+                     "sku": worksheet[skuCell].v,
+                     "payg": worksheet[paygPrice].v
+                  }
+                  paygPriceCollection.push(priceDeatils);
+                  console.log(paygPriceCollection);
+                  payGTab_Min_Count++; 
+             }
+          }
+         }
+       });
+  }
+  catch(e){
+        console.log("Oops.......");
+        console.log("Something is wrong with Merch Price sheet");
+        console.log(e);
+  }
+}
+
+
+
+
+require.extensions['.json'] = function (module, filename) {
+    module.exports = fs.readFileSync(filename, 'utf8');
+};
+
+var recursive = require('recursive-readdir');
+
+var pathRegExp = /\$\{(.*?)\}/g;
+var modifiedPathregExp = /\"\$\{(.*?)\"\}/g;
+
+var deviceDetailsCol = [], modifiedFileCount =0;
+
+recursive('C:/Users/cts1/IdeaProjects/productCatalogueData_Master/catalogueData/device/', function (err, files) {
+    
+    var jsonFileCount = 0, jsonFilesIndex = 0;
+    var json;
+    console.log(files.length);
+    var jsonFiles = files.filter(function(file) {jsonFileCount++; return file.substr(-5) === '.json'; });
+    deviceDetailsCol =[];
+    loadPayGSKUPrices();
+    jsonFiles.forEach(function(file) {
+        var content =  require(file);
+        //console.log(file);
+        var newContent = content;
+        var newSearch = newContent.match(pathRegExp);
+        var newPathsContainer = [];
+        if(newSearch != null){
+            var uniqueArray = newSearch.filter(function(elem, pos) {
+                return newSearch.indexOf(elem) == pos;
+            }); 
+            for(var jCount =0;jCount<uniqueArray.length;jCount++){ 
+               var newPathValue = '"'+uniqueArray[jCount]+'"';  
+               var regExpCheck = new RegExp(escapeRegExp(uniqueArray[jCount]),"g");
+               newPathsContainer.push(uniqueArray[jCount]);
+               newContent = newContent.replace(regExpCheck,newPathValue);
+               var doubleQuoteRegEx = new RegExp(escapeRegExp('""$'),"g");
+            }
+            json = JSON.parse(newContent);
+        }
+        else{
+            json = JSON.parse(newContent);
+        }
+        jsonFilesIndex++;
+        //if(json["id"] == "8281864e-faf7-4d28-86d1-5346b64f1c7cdvsd")
+        addCnCFlag(json,file,newPathsContainer);
+        
+    });
+});
+
+function addCnCFlag(json,file,newPathsContainer){
+    var prePaysims = json["relationships"];
+    var sku = json["sku"]["code"];
+    var patt = new RegExp("\/prepaySims\/");
+
+  
+       
+//check the sku id to change the set of plans
+   for(key in paygPriceCollection){
+   
+    if(sku == paygPriceCollection[key].sku){
+         json["rrp"]=" "+paygPriceCollection[key].payg+" ";
+         json["replacementCost"]=" "+paygPriceCollection[key].payg+" ";
+        
+//            console.log(file);
+//            console.log(prePaysims.length);
+        
+            for(var key2=0; key2 < prePaysims.length; key2++){
+                    if(patt.test(prePaysims[key2]["id"])){
+                      // console.log(prePaysims[key]["prices"][0]["oneOff"]);
+                      
+                        json["relationships"][key2]["prices"][0]["oneOff"]=" "+paygPriceCollection[key].payg+" ";
+                       
+                    }
+                        
+            }
+            
+            var fileNewContent = JSON.stringify(json);
+    convertBacktoOriginalState(fileNewContent,file,newPathsContainer);
+        
+
+    }
+   
+   }
+}
+
+
+function escapeRegExp(str) {
+    return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&");
+}
+
+function writeToFile(file,content){
+  fs.writeFile(file, content, function(err) {
+    if(err) {
+        console.log(err);
+    } else {
+        modifiedFileCount++;
+        console.log("Modified Files"+modifiedFileCount);
+        
+    }
+});
+     
+}
+
+
+function convertBacktoOriginalState(newContent,file,newPathsContainer){
+    var originalState;
+    
+    newContent = beautify(newContent, { indent_size: 2 });
+    for(var jCount =0;jCount<newPathsContainer.length;jCount++){
+               var oldPathValue = '"'+newPathsContainer[jCount]+'"';  
+               var regExpCheck = new RegExp(escapeRegExp(oldPathValue),"g");
+               newContent = newContent.replace(regExpCheck,newPathsContainer[jCount]);
+    }
+    writeToFile(file,newContent);  
+    
+}
